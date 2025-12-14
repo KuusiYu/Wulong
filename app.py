@@ -61,14 +61,25 @@ async def crawl_matches_by_date(date_str):
         'Upgrade-Insecure-Requests': '1'
     }
     
-    # 防封IP处理：添加随机延迟（优化为更短时间）
-    await asyncio.sleep(random.uniform(0.3, 1.0))
+    # 生产环境检测和优化
+    import os
+    is_production = os.environ.get('STREAMLIT_SERVER') is not None
+    
+    # 生产环境优化：增加延迟避免被封
+    if is_production:
+        await asyncio.sleep(random.uniform(1.0, 2.0))
+        timeout = aiohttp.ClientTimeout(total=30)  # 增加超时时间
+    else:
+        await asyncio.sleep(random.uniform(0.3, 1.0))
+        timeout = aiohttp.ClientTimeout(total=15)
     
     try:
-        # 创建aiohttp会话
-        async with aiohttp.ClientSession() as session:
+        # 创建aiohttp会话，优化SSL配置
+        connector = aiohttp.TCPConnector(ssl=False) if not is_production else aiohttp.TCPConnector()
+        
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             # 发送请求
-            async with session.get(url, headers=headers, timeout=15, ssl=False) as response:
+            async with session.get(url, headers=headers) as response:
                 # 读取响应内容
                 content = await response.read()
                 
@@ -274,14 +285,25 @@ async def crawl_matches():
         'Upgrade-Insecure-Requests': '1'
     }
     
-    # 防封IP处理：添加随机延迟（优化为更短时间）
-    await asyncio.sleep(random.uniform(0.3, 1.0))
+    # 生产环境检测和优化
+    import os
+    is_production = os.environ.get('STREAMLIT_SERVER') is not None
+    
+    # 生产环境优化：增加延迟避免被封
+    if is_production:
+        await asyncio.sleep(random.uniform(1.0, 2.0))
+        timeout = aiohttp.ClientTimeout(total=30)  # 增加超时时间
+    else:
+        await asyncio.sleep(random.uniform(0.3, 1.0))
+        timeout = aiohttp.ClientTimeout(total=15)
     
     try:
-        # 创建aiohttp会话
-        async with aiohttp.ClientSession() as session:
+        # 创建aiohttp会话，优化SSL配置
+        connector = aiohttp.TCPConnector(ssl=False) if not is_production else aiohttp.TCPConnector()
+        
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
             # 发送请求
-            async with session.get(url, headers=headers, timeout=15, ssl=False) as response:
+            async with session.get(url, headers=headers) as response:
                 # 读取响应内容
                 content = await response.read()
                 
