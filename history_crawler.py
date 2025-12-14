@@ -4,6 +4,7 @@ import random
 import re
 import time
 import traceback
+from data_cache import global_cache, get_cache_key
 
 # 配置参数
 MAX_RETRIES = 8
@@ -21,7 +22,7 @@ user_agents = [
 
 def make_request_with_retries(url, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS, timeout=15):
     """
-    带有重试机制的同步请求函数。
+    带有重试机制的同步请求函数，优化生产环境部署。
     """
     for attempt in range(retries):
         try:
@@ -30,16 +31,35 @@ def make_request_with_retries(url, retries=MAX_RETRIES, delay=RETRY_DELAY_SECOND
                 'User-Agent': random.choice(user_agents),
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
                 'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Encoding': 'gzip, deflate',
                 'Connection': 'keep-alive',
                 'Upgrade-Insecure-Requests': '1',
                 'Cache-Control': 'max-age=0',
                 'Referer': 'https://odds.500.com/',
-                'X-Requested-With': 'XMLHttpRequest',
-                'Origin': 'https://odds.500.com'
+                'X-Requested-With': 'XMLHttpRequest'
             }
-            response = requests.get(url, headers=headers, timeout=timeout, verify=False)
+            
+            # 生产环境优化的SSL配置
+            import os
+            is_production = os.environ.get('STREAMLIT_SERVER') is not None
+            
+            if is_production:
+                # 生产环境：增加超时时间，使用更宽松的SSL设置
+                timeout = 30
+                # 创建SSL上下文，忽略证书验证但使用更安全的协议
+                import ssl
+                ssl_context = ssl.create_default_context()
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                verify = ssl_context
+            else:
+                # 开发环境：使用标准设置
+                verify = False
+                timeout = 15
+                
+            response = requests.get(url, headers=headers, timeout=timeout, verify=verify)
             response.raise_for_status()
+            
             # 处理编码问题
             try:
                 html = response.content.decode('gbk')
@@ -49,6 +69,21 @@ def make_request_with_retries(url, retries=MAX_RETRIES, delay=RETRY_DELAY_SECOND
                 except UnicodeDecodeError:
                     html = response.content.decode('utf-8')
             return html
+            
+        except requests.exceptions.SSLError as e:
+            if attempt < retries - 1:
+                print(f"SSL错误 (尝试 {attempt + 1}/{retries}): {str(e)}, 等待 {delay} 秒后重试")
+                time.sleep(delay * 2)  # SSL错误时延长等待时间
+            else:
+                print(f"SSL连接失败: {str(e)}")
+                return None
+        except requests.exceptions.Timeout as e:
+            if attempt < retries - 1:
+                print(f"请求超时 (尝试 {attempt + 1}/{retries}): {str(e)}, 等待 {delay} 秒后重试")
+                time.sleep(delay)
+            else:
+                print(f"请求超时: {str(e)}")
+                return None
         except requests.RequestException as e:
             if attempt < retries - 1:
                 print(f"请求失败 (尝试 {attempt + 1}/{retries}): {str(e)}, 等待 {delay} 秒后重试")
@@ -58,7 +93,13 @@ def make_request_with_retries(url, retries=MAX_RETRIES, delay=RETRY_DELAY_SECOND
     return None
 
 def fetch_match_history(fid):
-    """根据比赛ID抓取双方历史交战记录"""
+    """根据比赛ID抓取双方历史交战记录，带缓存机制"""
+    # 检查缓存
+    cache_key = get_cache_key("history", fid)
+    cached_data = global_cache.get(cache_key)
+    if cached_data:
+        return cached_data
+    
     url = f'https://odds.500.com/fenxi/shuju-{fid}.shtml'
     
     print(f"开始获取双方数据: URL={url}, ID={fid}")
@@ -259,6 +300,8 @@ def fetch_match_history(fid):
         team_jiaozhan = soup.find('div', class_='history')
         if not team_jiaozhan:
             print(f"未找到两队交战史区域: {url}")
+            # 即使是空数据也缓存，避免重复请求
+            global_cache.set(cache_key, history_data)
             return history_data
             
     # 提取比赛信息
@@ -942,5 +985,7 @@ def fetch_match_history(fid):
                 history_data['pre_match_standings']['team_b']['stats'] = parse_standings_table(team_b_div)
                 
         print(f"赛前联赛积分排名提取完成")
-                
+        
+        # 缓存数据
+        global_cache.set(cache_key, history_data)
         return history_data
