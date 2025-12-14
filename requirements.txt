@@ -1,7 +1,10 @@
-streamlit
-pandas
-scipy
-beautifulsoup4
-requests
-aiohttp
-lxml
+streamlit>=1.52.0
+pandas>=2.3.3
+scipy>=1.16.3
+beautifulsoup4>=4.12.2
+requests>=2.31.0
+aiohttp>=3.13.2
+lxml>=6.0.2
+# 生产环境额外依赖
+certifi>=2023.7.22
+urllib3>=1.26.0
