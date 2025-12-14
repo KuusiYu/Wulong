@@ -3,112 +3,76 @@ from bs4 import BeautifulSoup
 import random
 import re
 import time
+import traceback
 
+# 配置参数
+MAX_RETRIES = 8
+RETRY_DELAY_SECONDS = 3
+
+# 防封IP处理：使用随机User-Agent池
+user_agents = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+]
+
+def make_request_with_retries(url, retries=MAX_RETRIES, delay=RETRY_DELAY_SECONDS, timeout=15):
+    """
+    带有重试机制的同步请求函数。
+    """
+    for attempt in range(retries):
+        try:
+            # 使用随机User-Agent和更完善的请求头
+            headers = {
+                'User-Agent': random.choice(user_agents),
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+                'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Connection': 'keep-alive',
+                'Upgrade-Insecure-Requests': '1',
+                'Cache-Control': 'max-age=0',
+                'Referer': 'https://odds.500.com/',
+                'X-Requested-With': 'XMLHttpRequest',
+                'Origin': 'https://odds.500.com'
+            }
+            response = requests.get(url, headers=headers, timeout=timeout, verify=False)
+            response.raise_for_status()
+            # 处理编码问题
+            try:
+                html = response.content.decode('gbk')
+            except UnicodeDecodeError:
+                try:
+                    html = response.content.decode('gb2312')
+                except UnicodeDecodeError:
+                    html = response.content.decode('utf-8')
+            return html
+        except requests.RequestException as e:
+            if attempt < retries - 1:
+                print(f"请求失败 (尝试 {attempt + 1}/{retries}): {str(e)}, 等待 {delay} 秒后重试")
+                time.sleep(delay + random.uniform(0, 1))  # 添加随机延迟
+            else:
+                print(f"所有尝试都失败: {str(e)}")
+    return None
 
 def fetch_match_history(fid):
     """根据比赛ID抓取双方历史交战记录"""
     url = f'https://odds.500.com/fenxi/shuju-{fid}.shtml'
     
-    # 防封IP处理：使用随机User-Agent池
-    user_agents = [
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/92.0.4515.131 Safari/537.36',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/93.0.4577.63 Safari/537.36',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.1.2 Safari/605.1.15',
-        'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
-    ]
-    
-    headers = {
-        'User-Agent': random.choice(user_agents),
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'zh-CN,zh;q=0.8,en-US;q=0.5,en;q=0.3',
-        'Accept-Encoding': 'gzip, deflate',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-    }
+    print(f"开始获取双方数据: URL={url}, ID={fid}")
     
     # 防封IP处理：添加随机延迟
     time.sleep(random.uniform(0.3, 1.0))
     
-    try:
-        # 发送请求
-        response = requests.get(url, headers=headers, timeout=15, verify=False)
-        
-        # 处理编码问题
-        try:
-            html = response.content.decode('gbk')
-        except UnicodeDecodeError:
-            try:
-                html = response.content.decode('gb2312')
-            except UnicodeDecodeError:
-                html = response.content.decode('utf-8')
-        
-        # 解析HTML
-        soup = BeautifulSoup(html, 'html.parser')
-                
-        # 检查页面是否返回"暂无该场比赛的数据"
-        if "暂无该场比赛的数据" in html:
-            print(f"页面返回暂无数据: {url}")
-            # 返回空数据结构
-            return {
-                'match_info': '',
-                'stats': '',
-                'matches': [],
-                'average_data': {
-                    'team_a': {
-                        'name': '',
-                        'rank': '',
-                        'average_goals': '',
-                        'average_goals_home': '',
-                        'average_goals_away': '',
-                        'average_conceded': '',
-                        'average_conceded_home': '',
-                        'average_conceded_away': ''
-                    },
-                    'team_b': {
-                        'name': '',
-                        'rank': '',
-                        'average_goals': '',
-                        'average_goals_home': '',
-                        'average_goals_away': '',
-                        'average_conceded': '',
-                        'average_conceded_home': '',
-                        'average_conceded_away': ''
-                    }
-                },
-                'pre_match_standings': {
-                    'title': '',
-                    'team_a': {
-                        'name': '',
-                        'rank': '',
-                        'stats': {
-                            '总成绩': {},
-                            '主场': {},
-                            '客场': {}
-                        }
-                    },
-                    'team_b': {
-                        'name': '',
-                        'rank': '',
-                        'stats': {
-                            '总成绩': {},
-                            '主场': {},
-                            '客场': {}
-                        }
-                    }
-                },
-                'recent_records_all': [],
-                'recent_records_home_away': {
-                    'team_a_home': [],
-                    'team_a_away': [],
-                    'team_b_home': [],
-                    'team_b_away': []
-                }
-            }
-        
-        # 初始化结果
-        history_data = {
+    # 发送请求
+    html = make_request_with_retries(url, timeout=20)
+    
+    if not html:
+        print(f"获取双方数据失败: 所有请求尝试都失败, URL={url}")
+        # 返回空数据结构
+        return {
             'match_info': '',
             'stats': '',
             'matches': [],
@@ -163,151 +127,274 @@ def fetch_match_history(fid):
                 'team_b_away': []
             }
         }
+    
+    print(f"请求成功: URL={url}")
+    print(f"HTML解析成功: URL={url}")
         
-        # 查找两队交战史区域
-        team_jiaozhan = soup.find('div', id='team_jiaozhan')
-        if not team_jiaozhan:
-            # 尝试查找其他可能的两队交战史区域
-            team_jiaozhan = soup.find('div', class_='history')
-            if not team_jiaozhan:
-                print(f"未找到两队交战史区域: {url}")
-                return history_data
-                
-        # 提取比赛信息
-        title = team_jiaozhan.find('h4')
-        if title:
-            history_data['match_info'] = title.text.strip()
-                
-        # 提取统计信息
-        his_info = team_jiaozhan.find('span', class_='his_info')
-        if his_info:
-            history_data['stats'] = his_info.text.strip()
-                
-        # 提取历史比赛列表
-        table = team_jiaozhan.find('table', class_='pub_table')
-        if not table:
-            # 尝试查找其他可能的表格
-            table = team_jiaozhan.find('table')
-            if not table:
-                print(f"未找到历史比赛表格: {url}")
-                # 不提前返回，继续解析其他数据
-                
-        if table:
-            tbody = table.find('tbody')
-            if not tbody:
-                tbody = table  # 有些表格可能没有tbody
-                    
-            rows = tbody.find_all('tr')
-            print(f"找到{len(rows)}行数据")
-                    
-            for row in rows:
-                # 提取所有单元格，包括th和td
-                cells = row.find_all(['th', 'td'])
-                        
-                # 跳过表头行（如果第一列是th）
-                if cells and cells[0].name == 'th':
-                    continue
-                        
-                # 跳过本场比赛行（带有bmatch类）
-                if 'bmatch' in row.get('class', []):
-                    continue
-                        
-                # 确保至少有5个单元格
-                if len(cells) < 5:
-                    print(f"行数据不足5个单元格: {len(cells)}个")
-                    continue
-                        
-                # 提取赛事信息
-                league = cells[0].text.strip() if cells[0] else ''
-                        
-                # 提取日期
-                date = cells[1].text.strip() if cells[1] else ''
-                        
-                # 提取对阵信息和比分
-                teams_cell = cells[2]
-                        
-                # 提取主队名称
-                home_team = teams_cell.find('span', class_='dz-l')
-                home_team_name = home_team.text.strip() if home_team else ''
-                # 移除主队排名
-                if home_team:
-                    home_rank = home_team.find('span', class_='gray')
-                    if home_rank:
-                        home_team_name = home_team_name.replace(home_rank.text, '').strip()
-                        
-                # 提取客队名称
-                away_team = teams_cell.find('span', class_='dz-r')
-                away_team_name = away_team.text.strip() if away_team else ''
-                # 移除客队排名
-                if away_team:
-                    away_rank = away_team.find('span', class_='gray')
-                    if away_rank:
-                        away_team_name = away_team_name.replace(away_rank.text, '').strip()
-                        
-                # 提取比分
-                score_tag = teams_cell.find('em')
-                score_text = ' VS '
-                if score_tag:
-                    # 提取比分文本
-                    score_content = score_tag.text.strip()
-                    if score_content != 'VS':
-                        # 在比分前后添加空格
-                        score_text = f" {score_content} "
-                        
-                # 组合对阵信息
-                teams_text = f"{home_team_name}{score_text}{away_team_name}"
-                        
-                # 提取半场比分
-                half_score = cells[3].text.strip() if cells[3] else ''
-                # 处理半场比分，添加空格
-                if half_score and half_score != 'VS':
-                    half_score = f" {half_score} "
-                elif half_score == 'VS':
-                    half_score = ' VS '
-                        
-                # 提取赛果
-                result = cells[4].text.strip() if cells[4] else ''
-                        
-                # 构建比赛数据
-                match_data = {
-                    'league': league,
-                    'date': date,
-                    'teams': teams_text,
-                    'half_score': half_score,
-                    'result': result
+    # 解析HTML
+    soup = BeautifulSoup(html, 'html.parser')
+    print(f"HTML解析成功: URL={url}")
+            
+    # 检查页面是否返回"暂无该场比赛的数据"
+    if "暂无该场比赛的数据" in html:
+        print(f"页面返回暂无数据: {url}")
+        # 返回空数据结构
+        return {
+            'match_info': '',
+            'stats': '',
+            'matches': [],
+            'average_data': {
+                'team_a': {
+                    'name': '',
+                    'rank': '',
+                    'average_goals': '',
+                    'average_goals_home': '',
+                    'average_goals_away': '',
+                    'average_conceded': '',
+                    'average_conceded_home': '',
+                    'average_conceded_away': ''
+                },
+                'team_b': {
+                    'name': '',
+                    'rank': '',
+                    'average_goals': '',
+                    'average_goals_home': '',
+                    'average_goals_away': '',
+                    'average_conceded': '',
+                    'average_conceded_home': '',
+                    'average_conceded_away': ''
                 }
+            },
+            'pre_match_standings': {
+                'title': '',
+                'team_a': {
+                    'name': '',
+                    'rank': '',
+                    'stats': {
+                        '总成绩': {},
+                        '主场': {},
+                        '客场': {}
+                    }
+                },
+                'team_b': {
+                    'name': '',
+                    'rank': '',
+                    'stats': {
+                        '总成绩': {},
+                        '主场': {},
+                        '客场': {}
+                    }
+                }
+            },
+            'recent_records_all': [],
+            'recent_records_home_away': {
+                'team_a_home': [],
+                'team_a_away': [],
+                'team_b_home': [],
+                'team_b_away': []
+            }
+        }
+    
+    # 初始化结果
+    history_data = {
+        'match_info': '',
+        'stats': '',
+        'matches': [],
+        'average_data': {
+            'team_a': {
+                'name': '',
+                'rank': '',
+                'average_goals': '',
+                'average_goals_home': '',
+                'average_goals_away': '',
+                'average_conceded': '',
+                'average_conceded_home': '',
+                'average_conceded_away': ''
+            },
+            'team_b': {
+                'name': '',
+                'rank': '',
+                'average_goals': '',
+                'average_goals_home': '',
+                'average_goals_away': '',
+                'average_conceded': '',
+                'average_conceded_home': '',
+                'average_conceded_away': ''
+            }
+        },
+        'pre_match_standings': {
+            'title': '',
+            'team_a': {
+                'name': '',
+                'rank': '',
+                'stats': {
+                    '总成绩': {},
+                    '主场': {},
+                    '客场': {}
+                }
+            },
+            'team_b': {
+                'name': '',
+                'rank': '',
+                'stats': {
+                    '总成绩': {},
+                    '主场': {},
+                    '客场': {}
+                }
+            }
+        },
+        'recent_records_all': [],
+        'recent_records_home_away': {
+            'team_a_home': [],
+            'team_a_away': [],
+            'team_b_home': [],
+            'team_b_away': []
+        }
+    }
+    
+    # 查找两队交战史区域
+    team_jiaozhan = soup.find('div', id='team_jiaozhan')
+    if not team_jiaozhan:
+        # 尝试查找其他可能的两队交战史区域
+        team_jiaozhan = soup.find('div', class_='history')
+        if not team_jiaozhan:
+            print(f"未找到两队交战史区域: {url}")
+            return history_data
+            
+    # 提取比赛信息
+    title = team_jiaozhan.find('h4')
+    if title:
+        history_data['match_info'] = title.text.strip()
+                
+    # 提取统计信息
+    his_info = team_jiaozhan.find('span', class_='his_info')
+    if his_info:
+        history_data['stats'] = his_info.text.strip()
+                
+    # 提取历史比赛列表
+    table = team_jiaozhan.find('table', class_='pub_table')
+    if not table:
+        # 尝试查找其他可能的表格
+        table = team_jiaozhan.find('table')
+        if not table:
+            print(f"未找到历史比赛表格: {url}")
+            # 不提前返回，继续解析其他数据
+                
+    if table:
+        tbody = table.find('tbody')
+        if not tbody:
+            tbody = table  # 有些表格可能没有tbody
+                    
+        rows = tbody.find_all('tr')
+        print(f"找到{len(rows)}行数据")
+                    
+        for row in rows:
+            # 提取所有单元格，包括th和td
+            cells = row.find_all(['th', 'td'])
+                    
+            # 跳过表头行（如果第一列是th）
+            if cells and cells[0].name == 'th':
+                continue
+                    
+            # 跳过本场比赛行（带有bmatch类）
+            if 'bmatch' in row.get('class', []):
+                continue
                         
-                history_data['matches'].append(match_data)
-                print(f"添加了一场比赛数据: {match_data['teams']}")
+            # 确保至少有5个单元格
+            if len(cells) < 5:
+                print(f"行数据不足5个单元格: {len(cells)}个")
+                continue
+                        
+            # 提取赛事信息
+            league = cells[0].text.strip() if cells[0] else ''
+                        
+            # 提取日期
+            date = cells[1].text.strip() if cells[1] else ''
+                        
+            # 提取对阵信息和比分
+            teams_cell = cells[2]
+                        
+            # 提取主队名称
+            home_team = teams_cell.find('span', class_='dz-l')
+            home_team_name = home_team.text.strip() if home_team else ''
+            # 移除主队排名
+            if home_team:
+                home_rank = home_team.find('span', class_='gray')
+                if home_rank:
+                    home_team_name = home_team_name.replace(home_rank.text, '').strip()
+                        
+            # 提取客队名称
+            away_team = teams_cell.find('span', class_='dz-r')
+            away_team_name = away_team.text.strip() if away_team else ''
+            # 移除客队排名
+            if away_team:
+                away_rank = away_team.find('span', class_='gray')
+                if away_rank:
+                    away_team_name = away_team_name.replace(away_rank.text, '').strip()
+                        
+            # 提取比分
+            score_tag = teams_cell.find('em')
+            score_text = ' VS '
+            if score_tag:
+                # 提取比分文本
+                score_content = score_tag.text.strip()
+                if score_content != 'VS':
+                    # 在比分前后添加空格
+                    score_text = f" {score_content} "
+                        
+            # 组合对阵信息
+            teams_text = f"{home_team_name}{score_text}{away_team_name}"
+                        
+            # 提取半场比分
+            half_score = cells[3].text.strip() if cells[3] else ''
+            # 处理半场比分，添加空格
+            if half_score and half_score != 'VS':
+                half_score = f"{half_score}"
+            elif half_score == 'VS':
+                half_score = ' VS '
+                        
+            # 提取赛果
+            result = cells[4].text.strip() if cells[4] else ''
+                        
+            # 构建比赛数据
+            match_data = {
+                'league': league,
+                'date': date,
+                'teams': teams_text,
+                'half_score': half_score,
+                'result': result
+            }
+                        
+            history_data['matches'].append(match_data)
+            print(f"添加了一场比赛数据: {match_data['teams']}")
                 
-        # 提取平均数据
-        print(f"开始提取平均数据: {url}")
+    # 提取平均数据
+    print(f"开始提取平均数据: {url}")
                 
-        # 查找平均数据区域
-        integral_div = None
+    # 查找平均数据区域
+    integral_div = None
                 
-        # 1. 首先查找所有div，搜索包含"平均数据"文本的div
-        all_divs = soup.find_all('div')
-        for div in all_divs:
-            h4 = div.find('h4')
-            if h4 and '平均数据' in h4.text:
-                integral_div = div
-                print(f"通过包含平均数据标题的h4找到div")
-                # 向上查找父级M_box div
-                parent = div.parent
-                while parent:
-                    if 'M_box' in parent.get('class', []):
-                        integral_div = parent
-                        print(f"找到父级M_box div")
-                        break
-                    parent = parent.parent
-                break
-                
-        # 2. 如果没有找到，尝试CSS选择器
-        if not integral_div:
-            integral_div = soup.select_one('div.M_box.integral')
-            if integral_div:
-                print(f"通过CSS选择器div.M_box.integral找到平均数据区域")
+    # 1. 首先查找所有div，搜索包含"平均数据"文本的div
+    all_divs = soup.find_all('div')
+    for div in all_divs:
+        h4 = div.find('h4')
+        if h4 and '平均数据' in h4.text:
+            integral_div = div
+            print(f"通过包含平均数据标题的h4找到div")
+            # 向上查找父级M_box div
+            parent = div.parent
+            while parent:
+                if 'M_box' in parent.get('class', []):
+                    integral_div = parent
+                    print(f"找到父级M_box div")
+                    break
+                parent = parent.parent
+    
+    # 2. 如果没有找到，尝试CSS选择器
+    if not integral_div:
+        integral_div = soup.select_one('div.M_box.integral')
+        if integral_div:
+            print(f"通过CSS选择器div.M_box.integral找到平均数据区域")
                 
         # 3. 如果仍然找不到，尝试查找所有带有M_box类的div
         if not integral_div:
@@ -857,14 +944,3 @@ def fetch_match_history(fid):
         print(f"赛前联赛积分排名提取完成")
                 
         return history_data
-    except requests.Timeout:
-        print(f'请求超时: {url}')
-        return {'match_info': '', 'stats': '', 'matches': [], 'average_data': {'team_a': {}, 'team_b': {}}, 'pre_match_standings': {'title': '', 'team_a': {'name': '', 'rank': '', 'stats': {'总成绩': {}, '主场': {}, '客场': {}}}, 'team_b': {'name': '', 'rank': '', 'stats': {'总成绩': {}, '主场': {}, '客场': {}}}},'recent_records_all': [], 'recent_records_home_away': {'team_a_home': [], 'team_a_away': [], 'team_b_home': [], 'team_b_away': []}}
-    except requests.RequestException as e:
-        print(f'网络请求失败: {e}')
-        return {'match_info': '', 'stats': '', 'matches': [], 'average_data': {'team_a': {}, 'team_b': {}}, 'pre_match_standings': {'title': '', 'team_a': {'name': '', 'rank': '', 'stats': {'总成绩': {}, '主场': {}, '客场': {}}}, 'team_b': {'name': '', 'rank': '', 'stats': {'总成绩': {}, '主场': {}, '客场': {}}}},'recent_records_all': [], 'recent_records_home_away': {'team_a_home': [], 'team_a_away': [], 'team_b_home': [], 'team_b_away': []}}
-    except Exception as e:
-        print(f'爬取历史交战记录失败: {e}')
-        import traceback
-        traceback.print_exc()
-        return {'match_info': '', 'stats': '', 'matches': [], 'average_data': {'team_a': {}, 'team_b': {}}, 'pre_match_standings': {'title': '', 'team_a': {'name': '', 'rank': '', 'stats': {'总成绩': {}, '主场': {}, '客场': {}}}, 'team_b': {'name': '', 'rank': '', 'stats': {'总成绩': {}, '主场': {}, '客场': {}}}},'recent_records_all': [], 'recent_records_home_away': {'team_a_home': [], 'team_a_away': [], 'team_b_home': [], 'team_b_away': []}}
