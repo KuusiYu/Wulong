@@ -777,8 +777,14 @@ if st.session_state.matches:
     def create_on_fetch_odds(fid):
         def on_fetch_odds():
             with st.spinner(f'正在获取比赛{fid}的赔率数据...'):
-                odds_data = fetch_all_odds_data(fid)
-                st.session_state.odds_data[fid] = odds_data
+                try:
+                    odds_data = fetch_all_odds_data(fid)
+                    st.session_state.odds_data[fid] = odds_data
+                except Exception as e:
+                    import traceback
+                    error_msg = f"获取赔率数据失败: {str(e)}\n详细错误:\n{traceback.format_exc()}"
+                    st.error(error_msg)
+                    st.session_state.odds_data[fid] = None
         return on_fetch_odds
     
     # 默认使用单列布局
@@ -1118,8 +1124,14 @@ if st.session_state.matches:
                             if row['fid'] not in st.session_state.odds_data:
                                 # 获取赔率数据
                                 with st.spinner('正在获取比赛' + row['fid'] + '的赔率数据...'):
-                                    odds_data = fetch_all_odds_data(row['fid'])
-                                    st.session_state.odds_data[row['fid']] = odds_data
+                                    try:
+                                        odds_data = fetch_all_odds_data(row['fid'])
+                                        st.session_state.odds_data[row['fid']] = odds_data
+                                    except Exception as e:
+                                        import traceback
+                                        error_msg = f"获取赔率数据失败: {str(e)}\n详细错误:\n{traceback.format_exc()}"
+                                        st.error(error_msg)
+                                        st.session_state.odds_data[row['fid']] = None
                             
                             # 获取最新的赔率数据
                             current_odds = st.session_state.odds_data.get(row['fid'], None)
@@ -1350,8 +1362,48 @@ if st.session_state.matches:
                             # 检查会话状态中是否已有该比赛的历史数据
                             if f'history_data_{fid}' not in st.session_state:
                                 with st.spinner(f'正在获取比赛{fid}的双方历史交战记录...'):
-                                    history_data = fetch_match_history(fid)
-                                    st.session_state[f'history_data_{fid}'] = history_data
+                                    try:
+                                        history_data = fetch_match_history(fid)
+                                        # 确保history_data不是None
+                                        if history_data is None:
+                                            # 返回一个空的历史数据结构
+                                            history_data = {
+                                                'match_info': '',
+                                                'stats': '',
+                                                'matches': [],
+                                                'average_data': {},
+                                                'pre_match_standings': {
+                                                    'title': '',
+                                                    'team_a': {'name': '', 'stats': {}},
+                                                    'team_b': {'name': '', 'stats': {}}
+                                                },
+                                                'recent_records': {'home': [], 'away': []},
+                                                'recent_records_all': [],
+                                                'recent_records_home_away': {
+                                                    'team_a_home': [],
+                                                    'team_a_away': [],
+                                                    'team_b_home': [],
+                                                    'team_b_away': []
+                                                }
+                                            }
+                                        st.session_state[f'history_data_{fid}'] = history_data
+                                    except Exception as e:
+                                        import traceback
+                                        error_msg = f"获取历史数据失败: {str(e)}\n详细错误:\n{traceback.format_exc()}"
+                                        st.error(error_msg)
+                                        # 返回一个空的历史数据结构
+                                        st.session_state[f'history_data_{fid}'] = {
+                                            'match_info': '',
+                                            'stats': '',
+                                            'matches': [],
+                                            'average_data': {},
+                                            'pre_match_standings': {
+                                                'title': '',
+                                                'team_a': {'name': '', 'stats': {}},
+                                                'team_b': {'name': '', 'stats': {}}
+                                            },
+                                            'recent_records': {'home': [], 'away': []}
+                                        }
                             else:
                                 history_data = st.session_state[f'history_data_{fid}']
                             
