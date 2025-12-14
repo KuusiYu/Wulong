@@ -4,3 +4,4 @@ scipy
 beautifulsoup4
 requests
 aiohttp
+lxml
